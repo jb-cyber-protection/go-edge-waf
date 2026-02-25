@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"go-edge-waf/internal/logging"
 	"go-edge-waf/internal/proxy"
 )
 
@@ -18,8 +19,11 @@ func main() {
 		log.Fatalf("failed to create proxy: %v", err)
 	}
 
+	logger := logging.New()
+	reqLogger := logging.RequestLogger(logger)
+
 	mux := http.NewServeMux()
-	mux.Handle("/", withBasicLogging(p))
+	mux.Handle("/", reqLogger(p))
 
 	srv := &http.Server{
 		Addr:              listenAddr,
@@ -31,29 +35,6 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
-}
-
-func withBasicLogging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-
-		// Wrap ResponseWriter so we can log status codes
-		lw := &loggingResponseWriter{ResponseWriter: w, statusCode: 200}
-		next.ServeHTTP(lw, r)
-
-		dur := time.Since(start)
-		log.Printf("%s %s -> %d (%s)", r.Method, r.URL.Path, lw.statusCode, dur)
-	})
-}
-
-type loggingResponseWriter struct {
-	http.ResponseWriter
-	statusCode int
-}
-
-func (lw *loggingResponseWriter) WriteHeader(code int) {
-	lw.statusCode = code
-	lw.ResponseWriter.WriteHeader(code)
 }
 
 func getEnv(key, fallback string) string {
