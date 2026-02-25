@@ -19,3 +19,15 @@ curl -i http://localhost:8080
 
 ### Request Flow + Logging
 ![Request Flow](docs/images/issue-1-request-flow.png)
+
+## Logging
+Each request emits a single JSON log line (one event per request) and includes an `X-Request-Id` response header for traceability.
+EOF
+
+## Issue #2 – Structured JSON Logging
+
+### Proxy Running
+![Proxy Running JSON](docs/images/issue-2-proxy-running-json.png)
+
+### JSON Log Output
+![JSON Log Output](docs/images/issue-2-json-log-output.png)
