@@ -75,3 +75,26 @@ If the YAML file is invalid or missing, the WAF falls back to safe default rules
 
 You can override the rules file path using:
 - `WAF_RULES_PATH` (default: `config/waf_rules.yaml`)
+
+## Issue #7 – Audit Mode (Log-Only Enforcement)
+
+The WAF supports two operating modes:
+
+- `block` (default): actively blocks malicious requests (403/429)
+- `audit`: logs detections but allows traffic to pass
+
+Mode can be configured via:
+- `config/waf_rules.yaml` → `mode: block|audit`
+- Environment variable override → `WAF_MODE`
+
+### Audit Mode – Request Allowed
+Even malicious input returns 200 OK when in audit mode:
+
+![Audit allowed](docs/images/issue-7-audit-mode-allowed.png)
+
+### Audit Mode – Security Event Logged
+Detections are still recorded as structured security events:
+
+![Audit security event](docs/images/issue-7-audit-mode-security-event.png)
+
+This enables safe monitoring before enabling blocking in production.
