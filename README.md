@@ -47,3 +47,16 @@ EOF
 
 ### Security Event Log
 ![XSS security event](docs/images/issue-4-xss-security-event.png)
+
+## Issue #5 – IP Rate Limiting
+
+### Rate Limit Triggered (429)
+![Rate limit 429](docs/images/issue-5-rate-limit-429.png)
+
+### Security Event Log
+![Rate limit security event](docs/images/issue-5-rate-limit-security-event.png)
+
+### Config
+Rate limiting can be configured via environment variables:
+- `RATE_LIMIT_MAX` (default: 30)
+- `RATE_LIMIT_WINDOW_SECONDS` (default: 10)

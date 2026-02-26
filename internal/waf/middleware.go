@@ -40,10 +40,23 @@ func SQLiBlocker(detector *SQLiDetector, logger *logging.Logger) func(http.Handl
 }
 
 func clientIPOnly(remoteAddr string) string {
-	// Handles "ip:port" or just "ip"
+	// Handles:
+	// - "127.0.0.1:12345"
+	// - "[::1]:12345"
+	// - "::1"
+	// - "127.0.0.1"
+	if strings.HasPrefix(remoteAddr, "[") {
+		// Bracketed IPv6: [::1]:port
+		if end := strings.LastIndex(remoteAddr, "]"); end != -1 {
+			return remoteAddr[1:end]
+		}
+	}
+
+	// IPv4:port (single colon)
 	if i := strings.LastIndex(remoteAddr, ":"); i > 0 && strings.Count(remoteAddr, ":") == 1 {
 		return remoteAddr[:i]
 	}
-	// For IPv6 formats or unexpected, return as-is
+
+	// Already an IP without port (or unexpected format)
 	return remoteAddr
 }
