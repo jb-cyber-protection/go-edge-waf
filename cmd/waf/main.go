@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"go-edge-waf/internal/config"
 	"go-edge-waf/internal/logging"
 	"go-edge-waf/internal/proxy"
 	"go-edge-waf/internal/waf"
@@ -19,6 +20,8 @@ func main() {
 	limit := getEnvInt("RATE_LIMIT_MAX", 30)
 	windowSeconds := getEnvInt("RATE_LIMIT_WINDOW_SECONDS", 10)
 
+	rulesPath := getEnv("WAF_RULES_PATH", "config/waf_rules.yaml")
+
 	p, err := proxy.NewReverseProxy(backendURL)
 	if err != nil {
 		log.Fatalf("failed to create proxy: %v", err)
@@ -27,11 +30,24 @@ func main() {
 	logger := logging.New()
 	reqLogger := logging.RequestLogger(logger)
 
-	// Detectors + blockers
-	sqliDetector := waf.NewSQLiDetector()
-	sqli := waf.SQLiBlocker(sqliDetector, logger)
+	// Load rules from config (fallback gracefully if invalid)
+	compiled, err := config.LoadWAFRules(rulesPath)
+	if err != nil {
+		log.Printf("warning: failed to load WAF rules from %s: %v (using defaults)", rulesPath, err)
+	}
 
-	xssDetector := waf.NewXSSDetector()
+	var sqliDetector *waf.SQLiDetector
+	var xssDetector *waf.XSSDetector
+
+	if compiled != nil {
+		sqliDetector = waf.NewSQLiDetectorFromRules(compiled.SQLi)
+		xssDetector = waf.NewXSSDetectorFromRules(compiled.XSS)
+	} else {
+		sqliDetector = waf.NewSQLiDetector()
+		xssDetector = waf.NewXSSDetector()
+	}
+
+	sqli := waf.SQLiBlocker(sqliDetector, logger)
 	xss := waf.XSSBlocker(xssDetector, logger)
 
 	rl := waf.NewRateLimiterFromConfig(limit, windowSeconds)
@@ -48,6 +64,7 @@ func main() {
 
 	log.Printf("go-edge-waf listening on %s (proxying to %s)", listenAddr, backendURL)
 	log.Printf("rate limiting: %d requests / %ds window", limit, windowSeconds)
+	log.Printf("rules file: %s", rulesPath)
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)

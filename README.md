@@ -60,3 +60,18 @@ EOF
 Rate limiting can be configured via environment variables:
 - `RATE_LIMIT_MAX` (default: 30)
 - `RATE_LIMIT_WINDOW_SECONDS` (default: 10)
+
+## Issue #6 – Configurable Rule Engine
+
+WAF detection rules are externalized into `config/waf_rules.yaml` and compiled at startup.
+
+### YAML Rule Configuration
+![Rules config](docs/images/issue-6-rules-config.png)
+
+### Config-Based Rule Blocking
+![Config rule block](docs/images/issue-6-config-rule-block.png)
+
+If the YAML file is invalid or missing, the WAF falls back to safe default rules.
+
+You can override the rules file path using:
+- `WAF_RULES_PATH` (default: `config/waf_rules.yaml`)

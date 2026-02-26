@@ -7,44 +7,43 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"go-edge-waf/internal/config"
 )
 
 type XSSDetector struct {
-	rules        []rule
+	rules        []config.CompiledRule
 	maxBodyBytes int64
 }
 
-func NewXSSDetector() *XSSDetector {
-	// High-signal patterns to keep false positives minimal.
-	rules := []rule{
-		{id: "xss_script_tag", re: regexp.MustCompile(`(?i)<\s*script\b`)},
-		{id: "xss_javascript_scheme", re: regexp.MustCompile(`(?i)javascript\s*:`)},
-		{id: "xss_event_handler", re: regexp.MustCompile(`(?i)\bon\w+\s*=`)}, // onerror=, onclick=, etc.
-
-		// Common URL-encoded forms
-		{id: "xss_encoded_script", re: regexp.MustCompile(`(?i)%3c\s*script\b`)},
-		{id: "xss_encoded_js_scheme", re: regexp.MustCompile(`(?i)javascript%3a`)},
-	}
-
+func NewXSSDetectorFromRules(rules []config.CompiledRule) *XSSDetector {
 	return &XSSDetector{
 		rules:        rules,
 		maxBodyBytes: 1 << 20, // 1MB
 	}
 }
 
-// InspectXSS checks headers, query params, and body. If it reads the body, it restores it.
+// Fallback default rules if config fails
+func NewXSSDetector() *XSSDetector {
+	defaultRules := []config.CompiledRule{
+		{ID: "xss_script_tag", RE: regexp.MustCompile(`(?i)<\s*script\b`)},
+		{ID: "xss_javascript_scheme", RE: regexp.MustCompile(`(?i)javascript\s*:`)},
+		{ID: "xss_event_handler", RE: regexp.MustCompile(`(?i)\bon\w+\s*=`)},
+		{ID: "xss_encoded_script", RE: regexp.MustCompile(`(?i)%3c\s*script\b`)},
+		{ID: "xss_encoded_js_scheme", RE: regexp.MustCompile(`(?i)javascript%3a`)},
+	}
+	return NewXSSDetectorFromRules(defaultRules)
+}
+
 func (d *XSSDetector) InspectXSS(r *http.Request) (*Match, bool) {
-	// 1) Headers
 	if m, ok := d.inspectHeaders(r.Header); ok {
 		return m, true
 	}
 
-	// 2) Query params / URL
 	if m, ok := d.inspectQuery(r.URL); ok {
 		return m, true
 	}
 
-	// 3) Body
 	if r.Body == nil {
 		return nil, false
 	}
@@ -61,7 +60,6 @@ func (d *XSSDetector) InspectXSS(r *http.Request) (*Match, bool) {
 
 	body := string(bodyBytes)
 
-	// If form-encoded, decode once
 	ct := r.Header.Get("Content-Type")
 	if strings.Contains(ct, "application/x-www-form-urlencoded") {
 		if decoded, err := url.QueryUnescape(body); err == nil {
@@ -70,8 +68,8 @@ func (d *XSSDetector) InspectXSS(r *http.Request) (*Match, bool) {
 	}
 
 	for _, ru := range d.rules {
-		if ru.re.MatchString(body) {
-			return &Match{RuleID: ru.id, Where: "body"}, true
+		if ru.RE.MatchString(body) {
+			return &Match{RuleID: ru.ID, Where: "body"}, true
 		}
 	}
 
@@ -79,7 +77,6 @@ func (d *XSSDetector) InspectXSS(r *http.Request) (*Match, bool) {
 }
 
 func (d *XSSDetector) inspectHeaders(h http.Header) (*Match, bool) {
-	// Scan a small subset of headers to reduce noise/false positives.
 	keys := []string{"User-Agent", "Referer", "Cookie", "X-Forwarded-For", "X-Real-Ip"}
 	for _, k := range keys {
 		v := h.Get(k)
@@ -87,8 +84,8 @@ func (d *XSSDetector) inspectHeaders(h http.Header) (*Match, bool) {
 			continue
 		}
 		for _, ru := range d.rules {
-			if ru.re.MatchString(v) {
-				return &Match{RuleID: ru.id, Where: "header:" + k}, true
+			if ru.RE.MatchString(v) {
+				return &Match{RuleID: ru.ID, Where: "header:" + k}, true
 			}
 		}
 	}
@@ -100,8 +97,8 @@ func (d *XSSDetector) inspectQuery(u *url.URL) (*Match, bool) {
 
 	if raw != "" {
 		for _, ru := range d.rules {
-			if ru.re.MatchString(raw) {
-				return &Match{RuleID: ru.id, Where: "query"}, true
+			if ru.RE.MatchString(raw) {
+				return &Match{RuleID: ru.ID, Where: "query"}, true
 			}
 		}
 	}
@@ -110,8 +107,8 @@ func (d *XSSDetector) inspectQuery(u *url.URL) (*Match, bool) {
 	for _, arr := range vals {
 		for _, item := range arr {
 			for _, ru := range d.rules {
-				if ru.re.MatchString(item) {
-					return &Match{RuleID: ru.id, Where: "query"}, true
+				if ru.RE.MatchString(item) {
+					return &Match{RuleID: ru.ID, Where: "query"}, true
 				}
 			}
 		}

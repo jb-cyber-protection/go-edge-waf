@@ -7,53 +7,48 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"go-edge-waf/internal/config"
 )
 
 type Match struct {
 	RuleID string
-	Where  string // "query" or "body"
+	Where  string // "query" or "body" or "header:Name"
 }
 
 type SQLiDetector struct {
-	rules        []rule
+	rules        []config.CompiledRule
 	maxBodyBytes int64
 }
 
-type rule struct {
-	id string
-	re *regexp.Regexp
-}
-
-func NewSQLiDetector() *SQLiDetector {
-	// Minimal targeted rules for Issue #3.
-	// (?i) = case-insensitive.
-	rules := []rule{
-		{id: "sqli_or_true", re: regexp.MustCompile(`(?i)(?:'|%27)?\s*or\s+1\s*=\s*1`)},
-		{id: "sqli_union_select", re: regexp.MustCompile(`(?i)\bunion\b\s+\bselect\b`)},
-		{id: "sqli_drop_table", re: regexp.MustCompile(`(?i)\bdrop\b\s+\btable\b`)},
-		// Common SQL comment tokens often used to truncate queries
-		{id: "sqli_comment", re: regexp.MustCompile(`(?i)(--|#|/\*)`)},
-	}
+func NewSQLiDetectorFromRules(rules []config.CompiledRule) *SQLiDetector {
 	return &SQLiDetector{
 		rules:        rules,
 		maxBodyBytes: 1 << 20, // 1MB
 	}
 }
 
-// Inspect checks query params and request body.
-// If it reads the body, it restores it so downstream (reverse proxy) can still use it.
+// Fallback default rules if config fails
+func NewSQLiDetector() *SQLiDetector {
+	defaultRules := []config.CompiledRule{
+		{ID: "sqli_or_true", RE: regexp.MustCompile(`(?i)(?:'|%27)?\s*or\s+1\s*=\s*1`)},
+		{ID: "sqli_union_select", RE: regexp.MustCompile(`(?i)\bunion\b\s+\bselect\b`)},
+		{ID: "sqli_drop_table", RE: regexp.MustCompile(`(?i)\bdrop\b\s+\btable\b`)},
+		{ID: "sqli_comment", RE: regexp.MustCompile(`(?i)(--|#|/\*)`)},
+	}
+	return NewSQLiDetectorFromRules(defaultRules)
+}
+
 func (d *SQLiDetector) Inspect(r *http.Request) (*Match, bool) {
-	// 1) Query string / URL params
 	if m, ok := d.inspectQuery(r.URL); ok {
 		return m, true
 	}
 
-	// 2) Body (only if present)
 	if r.Body == nil {
 		return nil, false
 	}
 
-	bodyBytes, restored, ok := d.readAndRestoreBody(r)
+	bodyBytes, restored, ok := readAndRestoreBodyLocal(r, d.maxBodyBytes)
 	if !ok {
 		return nil, false
 	}
@@ -65,7 +60,6 @@ func (d *SQLiDetector) Inspect(r *http.Request) (*Match, bool) {
 
 	body := string(bodyBytes)
 
-	// If form data, decode once for readability
 	ct := r.Header.Get("Content-Type")
 	if strings.Contains(ct, "application/x-www-form-urlencoded") {
 		if decoded, err := url.QueryUnescape(body); err == nil {
@@ -74,8 +68,8 @@ func (d *SQLiDetector) Inspect(r *http.Request) (*Match, bool) {
 	}
 
 	for _, ru := range d.rules {
-		if ru.re.MatchString(body) {
-			return &Match{RuleID: ru.id, Where: "body"}, true
+		if ru.RE.MatchString(body) {
+			return &Match{RuleID: ru.ID, Where: "body"}, true
 		}
 	}
 
@@ -87,8 +81,8 @@ func (d *SQLiDetector) inspectQuery(u *url.URL) (*Match, bool) {
 
 	if raw != "" {
 		for _, ru := range d.rules {
-			if ru.re.MatchString(raw) {
-				return &Match{RuleID: ru.id, Where: "query"}, true
+			if ru.RE.MatchString(raw) {
+				return &Match{RuleID: ru.ID, Where: "query"}, true
 			}
 		}
 	}
@@ -97,8 +91,8 @@ func (d *SQLiDetector) inspectQuery(u *url.URL) (*Match, bool) {
 	for _, arr := range vals {
 		for _, item := range arr {
 			for _, ru := range d.rules {
-				if ru.re.MatchString(item) {
-					return &Match{RuleID: ru.id, Where: "query"}, true
+				if ru.RE.MatchString(item) {
+					return &Match{RuleID: ru.ID, Where: "query"}, true
 				}
 			}
 		}
@@ -107,8 +101,8 @@ func (d *SQLiDetector) inspectQuery(u *url.URL) (*Match, bool) {
 	return nil, false
 }
 
-func (d *SQLiDetector) readAndRestoreBody(r *http.Request) ([]byte, io.ReadCloser, bool) {
-	limited := io.LimitReader(r.Body, d.maxBodyBytes)
+func readAndRestoreBodyLocal(r *http.Request, max int64) ([]byte, io.ReadCloser, bool) {
+	limited := io.LimitReader(r.Body, max)
 	b, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, nil, false
