@@ -6,10 +6,9 @@ import (
 	"go-edge-waf/internal/logging"
 )
 
-func XSSBlocker(detector *XSSDetector, logger *logging.Logger) func(http.Handler) http.Handler {
+func XSSEnforcer(mode Mode, detector *XSSDetector, logger *logging.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Ensure request_id exists so logs correlate
 			reqID, ok := logging.GetRequestID(r)
 			if !ok {
 				reqID = logging.NewRequestID()
@@ -20,16 +19,20 @@ func XSSBlocker(detector *XSSDetector, logger *logging.Logger) func(http.Handler
 				logger.Log(logging.Event{
 					"type":       "security_event",
 					"category":   "xss",
-					"action":     "blocked",
+					"action":     "detected",
 					"rule_id":    match.RuleID,
 					"location":   match.Where,
+					"mode":       string(mode),
 					"request_id": reqID,
 					"remote_ip":  clientIPOnly(r.RemoteAddr),
 					"method":     r.Method,
 					"path":       r.URL.Path,
 				})
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
+
+				if mode == ModeBlock {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
 			}
 
 			next.ServeHTTP(w, r)

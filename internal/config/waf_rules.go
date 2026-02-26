@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,6 +15,7 @@ type RuleConfig struct {
 }
 
 type WAFRulesConfig struct {
+	Mode string       `yaml:"mode"` // "block" or "audit"
 	SQLi []RuleConfig `yaml:"sqli"`
 	XSS  []RuleConfig `yaml:"xss"`
 }
@@ -24,6 +26,7 @@ type CompiledRule struct {
 }
 
 type CompiledWAFRules struct {
+	Mode string
 	SQLi []CompiledRule
 	XSS  []CompiledRule
 }
@@ -39,7 +42,16 @@ func LoadWAFRules(path string) (*CompiledWAFRules, error) {
 		return nil, fmt.Errorf("parse yaml: %w", err)
 	}
 
+	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+	if mode == "" {
+		mode = "block"
+	}
+	if mode != "block" && mode != "audit" {
+		return nil, fmt.Errorf("invalid mode %q (must be block or audit)", cfg.Mode)
+	}
+
 	compiled := &CompiledWAFRules{
+		Mode: mode,
 		SQLi: make([]CompiledRule, 0, len(cfg.SQLi)),
 		XSS:  make([]CompiledRule, 0, len(cfg.XSS)),
 	}

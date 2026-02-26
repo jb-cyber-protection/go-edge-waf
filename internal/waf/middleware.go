@@ -7,10 +7,9 @@ import (
 	"go-edge-waf/internal/logging"
 )
 
-func SQLiBlocker(detector *SQLiDetector, logger *logging.Logger) func(http.Handler) http.Handler {
+func SQLiEnforcer(mode Mode, detector *SQLiDetector, logger *logging.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Ensure request_id exists early so logs correlate
 			reqID, ok := logging.GetRequestID(r)
 			if !ok {
 				reqID = logging.NewRequestID()
@@ -21,17 +20,21 @@ func SQLiBlocker(detector *SQLiDetector, logger *logging.Logger) func(http.Handl
 				logger.Log(logging.Event{
 					"type":       "security_event",
 					"category":   "sqli",
-					"action":     "blocked",
+					"action":     "detected",
 					"rule_id":    match.RuleID,
 					"location":   match.Where,
+					"mode":       string(mode),
 					"request_id": reqID,
 					"remote_ip":  clientIPOnly(r.RemoteAddr),
 					"method":     r.Method,
 					"path":       r.URL.Path,
 				})
 
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
+				if mode == ModeBlock {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
+				// audit mode: allow request through
 			}
 
 			next.ServeHTTP(w, r)
@@ -40,23 +43,13 @@ func SQLiBlocker(detector *SQLiDetector, logger *logging.Logger) func(http.Handl
 }
 
 func clientIPOnly(remoteAddr string) string {
-	// Handles:
-	// - "127.0.0.1:12345"
-	// - "[::1]:12345"
-	// - "::1"
-	// - "127.0.0.1"
 	if strings.HasPrefix(remoteAddr, "[") {
-		// Bracketed IPv6: [::1]:port
 		if end := strings.LastIndex(remoteAddr, "]"); end != -1 {
 			return remoteAddr[1:end]
 		}
 	}
-
-	// IPv4:port (single colon)
 	if i := strings.LastIndex(remoteAddr, ":"); i > 0 && strings.Count(remoteAddr, ":") == 1 {
 		return remoteAddr[:i]
 	}
-
-	// Already an IP without port (or unexpected format)
 	return remoteAddr
 }

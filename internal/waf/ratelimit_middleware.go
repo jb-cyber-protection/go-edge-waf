@@ -8,10 +8,9 @@ import (
 	"go-edge-waf/internal/logging"
 )
 
-func RateLimit(rl *RateLimiter, logger *logging.Logger) func(http.Handler) http.Handler {
+func RateLimitEnforcer(mode Mode, rl *RateLimiter, logger *logging.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Ensure request_id exists for correlation
 			reqID, ok := logging.GetRequestID(r)
 			if !ok {
 				reqID = logging.NewRequestID()
@@ -19,25 +18,29 @@ func RateLimit(rl *RateLimiter, logger *logging.Logger) func(http.Handler) http.
 			}
 
 			ip := clientIPOnly(r.RemoteAddr)
-			logger.Log(logging.Event{"type": "debug", "msg": "rate_limit_key", "ip_key": ip, "remote_addr": r.RemoteAddr})
-			if !rl.Allow(ip) {
-				// Helpful headers for clients
-				w.Header().Set("Retry-After", "10") // seconds (matches default window)
-				w.Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.limit))
-				w.Header().Set("X-RateLimit-Window", strconv.Itoa(int(rl.window.Seconds())))
 
+			if !rl.Allow(ip) {
 				logger.Log(logging.Event{
 					"type":       "security_event",
 					"category":   "rate_limit",
-					"action":     "blocked",
+					"action":     "detected",
+					"mode":       string(mode),
 					"request_id": reqID,
 					"remote_ip":  ip,
 					"method":     r.Method,
 					"path":       r.URL.Path,
+					"limit":      rl.limit,
+					"window_sec": int(rl.window.Seconds()),
 				})
 
-				http.Error(w, "too many requests", http.StatusTooManyRequests)
-				return
+				if mode == ModeBlock {
+					w.Header().Set("Retry-After", strconv.Itoa(int(rl.window.Seconds())))
+					w.Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.limit))
+					w.Header().Set("X-RateLimit-Window", strconv.Itoa(int(rl.window.Seconds())))
+					http.Error(w, "too many requests", http.StatusTooManyRequests)
+					return
+				}
+				// audit mode: allow request through
 			}
 
 			next.ServeHTTP(w, r)
@@ -45,8 +48,7 @@ func RateLimit(rl *RateLimiter, logger *logging.Logger) func(http.Handler) http.
 	}
 }
 
-// Helper to construct a limiter from env-friendly values.
-// Used in main.go wiring.
+// Helper for main.go wiring
 func NewRateLimiterFromConfig(limit int, windowSeconds int) *RateLimiter {
 	if limit <= 0 {
 		limit = 30

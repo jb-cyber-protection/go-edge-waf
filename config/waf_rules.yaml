@@ -1,3 +1,4 @@
+mode: audit
 sqli:
   - id: sqli_or_true
     pattern: "(?i)(?:'|%27)?\\s*or\\s+1\\s*=\\s*1"

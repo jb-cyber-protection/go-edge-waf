@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"go-edge-waf/internal/config"
@@ -21,6 +22,7 @@ func main() {
 	windowSeconds := getEnvInt("RATE_LIMIT_WINDOW_SECONDS", 10)
 
 	rulesPath := getEnv("WAF_RULES_PATH", "config/waf_rules.yaml")
+	modeOverride := strings.ToLower(strings.TrimSpace(os.Getenv("WAF_MODE"))) // optional
 
 	p, err := proxy.NewReverseProxy(backendURL)
 	if err != nil {
@@ -30,15 +32,28 @@ func main() {
 	logger := logging.New()
 	reqLogger := logging.RequestLogger(logger)
 
-	// Load rules from config (fallback gracefully if invalid)
 	compiled, err := config.LoadWAFRules(rulesPath)
 	if err != nil {
 		log.Printf("warning: failed to load WAF rules from %s: %v (using defaults)", rulesPath, err)
 	}
 
+	mode := waf.ModeBlock
+	if compiled != nil {
+		if compiled.Mode == "audit" {
+			mode = waf.ModeAudit
+		}
+	}
+
+	if modeOverride == "audit" {
+		mode = waf.ModeAudit
+	} else if modeOverride == "block" {
+		mode = waf.ModeBlock
+	} else if modeOverride != "" {
+		log.Printf("warning: invalid WAF_MODE=%q (must be block or audit), ignoring", modeOverride)
+	}
+
 	var sqliDetector *waf.SQLiDetector
 	var xssDetector *waf.XSSDetector
-
 	if compiled != nil {
 		sqliDetector = waf.NewSQLiDetectorFromRules(compiled.SQLi)
 		xssDetector = waf.NewXSSDetectorFromRules(compiled.XSS)
@@ -47,11 +62,11 @@ func main() {
 		xssDetector = waf.NewXSSDetector()
 	}
 
-	sqli := waf.SQLiBlocker(sqliDetector, logger)
-	xss := waf.XSSBlocker(xssDetector, logger)
+	sqli := waf.SQLiEnforcer(mode, sqliDetector, logger)
+	xss := waf.XSSEnforcer(mode, xssDetector, logger)
 
 	rl := waf.NewRateLimiterFromConfig(limit, windowSeconds)
-	rateLimit := waf.RateLimit(rl, logger)
+	rateLimit := waf.RateLimitEnforcer(mode, rl, logger)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", reqLogger(rateLimit(sqli(xss(p)))))
@@ -63,6 +78,7 @@ func main() {
 	}
 
 	log.Printf("go-edge-waf listening on %s (proxying to %s)", listenAddr, backendURL)
+	log.Printf("mode: %s", mode)
 	log.Printf("rate limiting: %d requests / %ds window", limit, windowSeconds)
 	log.Printf("rules file: %s", rulesPath)
 
