@@ -8,6 +8,7 @@ import (
 
 	"go-edge-waf/internal/logging"
 	"go-edge-waf/internal/proxy"
+	"go-edge-waf/internal/waf"
 )
 
 func main() {
@@ -22,8 +23,11 @@ func main() {
 	logger := logging.New()
 	reqLogger := logging.RequestLogger(logger)
 
+	detector := waf.NewSQLiDetector()
+	sqli := waf.SQLiBlocker(detector, logger)
+
 	mux := http.NewServeMux()
-	mux.Handle("/", reqLogger(p))
+	mux.Handle("/", reqLogger(sqli(p)))
 
 	srv := &http.Server{
 		Addr:              listenAddr,

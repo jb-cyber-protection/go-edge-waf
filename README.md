@@ -31,3 +31,11 @@ EOF
 
 ### JSON Log Output
 ![JSON Log Output](docs/images/issue-2-json-log-output.png)
+
+## Issue #3 – SQL Injection Blocking
+
+### Blocked Request (403)
+![SQLi 403](docs/images/issue-3-sqli-403.png)
+
+### Security Event Log
+![SQLi security event](docs/images/issue-3-security-event.png)
