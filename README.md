@@ -39,3 +39,11 @@ EOF
 
 ### Security Event Log
 ![SQLi security event](docs/images/issue-3-security-event.png)
+
+## Issue #4 – XSS Blocking
+
+### Blocked Request (403)
+![XSS 403](docs/images/issue-4-xss-403.png)
+
+### Security Event Log
+![XSS security event](docs/images/issue-4-xss-security-event.png)

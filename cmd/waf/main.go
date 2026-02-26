@@ -23,11 +23,15 @@ func main() {
 	logger := logging.New()
 	reqLogger := logging.RequestLogger(logger)
 
-	detector := waf.NewSQLiDetector()
-	sqli := waf.SQLiBlocker(detector, logger)
+	// Detectors + blockers
+	sqliDetector := waf.NewSQLiDetector()
+	sqli := waf.SQLiBlocker(sqliDetector, logger)
+
+	xssDetector := waf.NewXSSDetector()
+	xss := waf.XSSBlocker(xssDetector, logger)
 
 	mux := http.NewServeMux()
-	mux.Handle("/", reqLogger(sqli(p)))
+	mux.Handle("/", reqLogger(sqli(xss(p))))
 
 	srv := &http.Server{
 		Addr:              listenAddr,
